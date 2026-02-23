@@ -31,15 +31,10 @@ class ResNet18Binary(nn.Module):
 # ---------- 加载模型（带缓存）----------
 @st.cache_resource
 def load_model():
-    """加载切分后的模型文件（适配4份）"""
+    """加载切分后的模型文件（自动添加model.前缀）"""
     
-    # 1. 加载元信息（如果有）
-    metadata_path = 'model_metadata.pth'
-    if os.path.exists(metadata_path):
-        metadata = torch.load(metadata_path, map_location='cpu')
-        num_parts = metadata.get('num_parts', 4)
-    else:
-        num_parts = 4
+    # 1. 确定分片数量
+    num_parts = 4  # 你用的是4份
     
     # 2. 加载所有分片
     state_dict = {}
@@ -53,22 +48,43 @@ def load_model():
             progress_bar.progress((i + 1) / num_parts)
         else:
             st.error(f"找不到模型分片文件: {filename}")
-            return None
+            # 如果是分片3找不到，尝试继续
+            if i == 3:
+                st.warning("分片3未找到，尝试只加载前3个分片")
+                num_parts = 3
     
     progress_bar.empty()
     
-    # 3. 创建模型
-    model = ResNet18Binary()
+    # 3. 检查键名
+    sample_keys = list(state_dict.keys())[:5]
+    st.write(f"加载的权重键示例: {sample_keys}")
     
-    # 4. 加载权重
+    # 4. 创建模型
+    model = ResNet18Binary()
+    model_keys = list(model.state_dict().keys())[:5]
+    st.write(f"模型期望的键示例: {model_keys}")
+    
+    # 5. 关键修复：给所有键名加上 'model.' 前缀
+    fixed_state_dict = {}
+    for key, value in state_dict.items():
+        # 如果键名不以 'model.' 开头，就加上
+        if not key.startswith('model.'):
+            new_key = 'model.' + key
+            fixed_state_dict[new_key] = value
+        else:
+            fixed_state_dict[key] = value
+    
+    st.write(f"修复后的键示例: {list(fixed_state_dict.keys())[:5]}")
+    
+    # 6. 加载权重
     try:
-        model.load_state_dict(state_dict)
-        st.success("模型加载成功！")
+        model.load_state_dict(fixed_state_dict)
+        st.success("✅ 模型加载成功！")
     except Exception as e:
         st.error(f"加载失败: {e}")
-        # 如果是键不匹配，尝试非严格模式
-        model.load_state_dict(state_dict, strict=False)
-        st.warning("使用非严格模式加载")
+        # 尝试非严格模式
+        model.load_state_dict(fixed_state_dict, strict=False)
+        st.warning("使用非严格模式加载，部分层可能未初始化")
     
     model.eval()
     return model
