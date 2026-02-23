@@ -33,30 +33,50 @@ class ResNet18Binary(nn.Module):
 def load_model():
     """加载切分后的模型文件"""
     
-    # 显示加载进度
-    progress_bar = st.progress(0, text="⏳ 正在加载模型分片1/3...")
+    # 1. 加载元信息（如果有）
+    metadata_path = 'model_metadata.pth'
+    if os.path.exists(metadata_path):
+        metadata = torch.load(metadata_path, map_location='cpu')
+        num_parts = metadata.get('num_parts', 3)
+        part_files = metadata.get('part_files', [f'model_part_{i}.pth' for i in range(num_parts)])
+    else:
+        # 如果没有元信息，直接找 part_0, part_1, part_2
+        num_parts = 3
+        part_files = [f'model_part_{i}.pth' for i in range(num_parts)]
     
-    # 加载三个分片
-    part0 = torch.load('model_part_0.pth', map_location='cpu')
-    progress_bar.progress(33, text="⏳ 正在加载模型分片2/3...")
+    # 2. 加载所有分片并合并
+    state_dict = {}
+    progress_bar = st.progress(0, text="正在加载模型分片...")
     
-    part1 = torch.load('model_part_1.pth', map_location='cpu')
-    progress_bar.progress(66, text="⏳ 正在加载模型分片3/3...")
+    for i, part_file in enumerate(part_files):
+        if os.path.exists(part_file):
+            part = torch.load(part_file, map_location='cpu')
+            state_dict.update(part)
+            progress_bar.progress((i + 1) / len(part_files))
+        else:
+            st.error(f"找不到模型分片文件: {part_file}")
+            return None
     
-    part2 = torch.load('model_part_2.pth', map_location='cpu')
-    progress_bar.progress(100, text="✅ 模型分片加载完成")
-    
-    # 合并state_dict
-    state_dict = {**part0, **part1, **part2}
-    
-    # 创建模型实例
-    model = ResNet18Binary()
-    model.load_state_dict(state_dict)
-    model.eval()
-    
-    # 清理进度条
     progress_bar.empty()
     
+    # 3. 创建模型实例
+    model = ResNet18Binary()
+    
+    # 4. 关键：打印一些信息帮助调试
+    st.write(f"模型期望的键: {list(model.state_dict().keys())[:5]}...")
+    st.write(f"加载的权重键: {list(state_dict.keys())[:5]}...")
+    
+    # 5. 尝试加载权重
+    try:
+        model.load_state_dict(state_dict)
+        st.success("模型加载成功！")
+    except Exception as e:
+        st.error(f"模型加载失败: {e}")
+        # 如果是键不匹配，尝试忽略不匹配的键
+        model.load_state_dict(state_dict, strict=False)
+        st.warning("使用非严格模式加载，部分层可能未初始化")
+    
+    model.eval()
     return model
 
 # ---------- 图像预处理 ----------
