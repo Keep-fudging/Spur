@@ -1,0 +1,6 @@
+# requirements.txt
+torch
+torchvision
+gradio
+pillow
+pandas
